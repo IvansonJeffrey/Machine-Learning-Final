@@ -1,0 +1,74 @@
+{
+  "attributes": {
+    "sleeve_length": "short-sleeve",
+    "lower_length": "medium-short",
+    "socks": "no",
+    "hat": "no",
+    "glasses": "no",
+    "neckwear": "no",
+    "wristwear": "no",
+    "ring": "NA",
+    "waist_accessory": "hidden",
+    "neckline": "round",
+    "outer_cardigan": "no",
+    "upper_cover_navel": "yes",
+    "fabric_0": "cotton",
+    "fabric_1": "cotton",
+    "fabric_2": "NA",
+    "color_0": "graphic",
+    "color_1": "pure-color",
+    "color_2": "NA"
+  },
+  "region_colors_vertical": {
+    "upper_body": {
+      "rgb": [
+        93,
+        86,
+        86
+      ],
+      "hex": "#5D5656"
+    },
+    "lower_body": {
+      "rgb": [
+        128,
+        115,
+        111
+      ],
+      "hex": "#80736F"
+    },
+    "shoes": {
+      "rgb": [
+        194,
+        174,
+        151
+      ],
+      "hex": "#C2AE97"
+    }
+  },
+  "region_colors_parsing": {
+    "top": {
+      "hex": "#877D7A",
+      "name": "grey"
+    },
+    "outer": {
+      "hex": null,
+      "name": null
+    },
+    "skirt": {
+      "hex": null,
+      "name": null
+    },
+    "pants": {
+      "hex": "#403E48",
+      "name": "dark grey"
+    },
+    "leggings": {
+      "hex": "#93705D",
+      "name": "orange"
+    },
+    "shoes": {
+      "hex": "#847878",
+      "name": "grey"
+    }
+  }
+}
