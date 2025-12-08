@@ -34,6 +34,10 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, models
 from tqdm import tqdm
+import matplotlib.pyplot as plt
+from sklearn.metrics import confusion_matrix, f1_score
+
+
 
 # -----------------------------
 # Helper label maps (from dataset README)
@@ -439,94 +443,6 @@ def decode_predictions(outputs: Dict[str, torch.Tensor]) -> Dict[str,str]:
 
     return out
 
-# -----------------------------
-# Region-based color detection (3 regions)
-# -----------------------------
-
-def extract_region_colors(img_np: np.ndarray) -> Dict[str, Dict[str, Optional[List[int]]]]:
-    """
-    img_np: H x W x 3 (uint8 or float)
-    Returns average RGB for 3 vertical regions:
-      - upper_body
-      - lower_body
-      - shoes
-    Uses central 30% width and user-specified height ranges.
-    """
-    h, w, _ = img_np.shape
-
-    # vertical band in the center 30% width
-    x0 = int(w * 0.35)
-    x1 = int(w * 0.65)
-
-    regions_y = {
-        "upper_body": (int(h * 0.20), int(h * 0.45)),  # chest area
-        "lower_body": (int(h * 0.50), int(h * 0.75)),  # hips/thighs
-        "shoes":      (int(h * 0.90), int(h * 0.98)),  # feet
-    }
-
-    result: Dict[str, Dict[str, Optional[List[int]]]] = {}
-
-    for name, (y0, y1) in regions_y.items():
-        # Clamp bounds to be safe
-        y0_clamp = max(0, min(h, y0))
-        y1_clamp = max(0, min(h, y1))
-        if y1_clamp <= y0_clamp:
-            result[name] = {"rgb": None, "hex": None}
-            continue
-
-        region = img_np[y0_clamp:y1_clamp, x0:x1]
-
-        if region.size == 0:
-            result[name] = {"rgb": None, "hex": None}
-            continue
-
-        # Average color
-        avg = region.mean(axis=(0,1))   # average RGB
-        r, g, b = [int(v) for v in avg]
-        hex_color = "#{:02X}{:02X}{:02X}".format(r, g, b)
-
-        result[name] = {
-            "rgb": [r, g, b],
-            "hex": hex_color
-        }
-
-    return result
-
-
-def visualize_color_regions(image_path: str, save_path: str = "vis_color_regions.png"):
-    """
-    Save an overlay image showing the three sampled regions:
-      - upper_body (red)
-      - lower_body (green)
-      - shoes (blue)
-    """
-    img = Image.open(image_path).convert("RGB")
-    w, h = img.size
-
-    x0 = int(w * 0.35)
-    x1 = int(w * 0.65)
-
-    regions_y = {
-        "upper_body": (int(h * 0.20), int(h * 0.45)),
-        "lower_body": (int(h * 0.50), int(h * 0.75)),
-        "shoes":      (int(h * 0.90), int(h * 0.98)),
-    }
-
-    overlay = Image.new("RGBA", img.size, (0,0,0,0))
-    draw = ImageDraw.Draw(overlay)
-
-    colors = {
-        "upper_body": (255,   0,   0, 90),
-        "lower_body": (  0, 255,   0, 90),
-        "shoes":      (  0,   0, 255, 90),
-    }
-
-    for name, (y0, y1) in regions_y.items():
-        draw.rectangle([x0, y0, x1, y1], fill=colors[name])
-
-    out = Image.alpha_composite(img.convert("RGBA"), overlay)
-    out.save(save_path)
-    print(f"[Viz] Saved region overlay to {save_path}")
 
 # -----------------------------
 # Training and evaluation
@@ -554,19 +470,101 @@ def train_one_epoch(model, dataloader, optimizer, device):
 
 
 def evaluate(model, dataloader, device):
+    """
+    Returns:
+      avg_loss: float
+      per_attr_acc: dict[attr_name -> accuracy]
+      macro_acc: float
+      per_attr_f1: dict[attr_name -> f1]
+      macro_f1: float
+      confusion: dict[attr_name -> 2D np.array]
+    """
     model.eval()
     total_loss = 0.0
+
+    # Only do detailed metrics for SHAPE attributes (for presentation)
+    shape_attrs = list(SHAPE_LABELS.keys())
+
+    # For accuracy
+    correct = {k: 0 for k in shape_attrs}
+    total = {k: 0 for k in shape_attrs}
+
+    # For F1 + confusion
+    all_targets = {k: [] for k in shape_attrs}
+    all_preds = {k: [] for k in shape_attrs}
+
     with torch.no_grad():
         for batch in tqdm(dataloader, desc='eval'):
             imgs = batch['image'].to(device)
             kps = batch['keypoints'].to(device)
-            labels = {'shape': batch['shape'].to(device),
-                      'fabric': batch['fabric'].to(device),
-                      'color': batch['color'].to(device)}
+            labels = {
+                'shape': batch['shape'].to(device),
+                'fabric': batch['fabric'].to(device),
+                'color': batch['color'].to(device)
+            }
             outputs = model(imgs, kps)
             loss = multitask_loss(outputs, labels, device)
             total_loss += loss.item()
-    return total_loss / len(dataloader)
+
+            # ----- Metrics for shape attributes -----
+            for i, attr in enumerate(shape_attrs):
+                logits = outputs[f'shape_{attr}']       # [B, C]
+                preds = logits.argmax(dim=1)            # [B]
+                labs = labels['shape'][:, i]            # [B]
+                mask = labs >= 0                        # ignore -1
+
+                if mask.sum() == 0:
+                    continue
+
+                p = preds[mask].cpu().numpy()
+                t = labs[mask].cpu().numpy()
+
+                correct[attr] += (p == t).sum()
+                total[attr] += len(t)
+                all_preds[attr].extend(p.tolist())
+                all_targets[attr].extend(t.tolist())
+
+    avg_loss = total_loss / len(dataloader)
+
+    # Per-attribute accuracy
+    per_attr_acc = {}
+    for attr in shape_attrs:
+        if total[attr] > 0:
+            per_attr_acc[attr] = correct[attr] / total[attr]
+        else:
+            per_attr_acc[attr] = None  # no labels available
+
+    # Macro accuracy (ignore None)
+    valid_accs = [v for v in per_attr_acc.values() if v is not None]
+    macro_acc = float(np.mean(valid_accs)) if valid_accs else None
+
+    # Per-attribute F1 + macro F1
+    per_attr_f1 = {}
+    for attr in shape_attrs:
+        if len(all_targets[attr]) > 0:
+            per_attr_f1[attr] = f1_score(
+                all_targets[attr],
+                all_preds[attr],
+                average='macro'
+            )
+        else:
+            per_attr_f1[attr] = None
+
+    valid_f1s = [v for v in per_attr_f1.values() if v is not None]
+    macro_f1 = float(np.mean(valid_f1s)) if valid_f1s else None
+
+    # Confusion matrices for each shape attribute
+    confusion = {}
+    for attr in shape_attrs:
+        if len(all_targets[attr]) > 0:
+            confusion[attr] = confusion_matrix(
+                all_targets[attr],
+                all_preds[attr]
+            )
+        else:
+            confusion[attr] = None
+
+    return avg_loss, per_attr_acc, macro_acc, per_attr_f1, macro_f1, confusion
 
 # -----------------------------
 # Inference util
@@ -619,9 +617,7 @@ def infer_single(model, image_path: str, device: torch.device, transforms_img, p
     decoded = decode_predictions(outs_squeezed)
 
     # region colors from raw image
-    region_colors = extract_region_colors(img_np)
-
-    return decoded, region_colors
+    return decoded
 
 # -----------------------------
 # CLI
@@ -662,23 +658,121 @@ def main():
         train_ds = torch.utils.data.Subset(ds, train_idx)
         val_ds = torch.utils.data.Subset(ds, val_idx)
 
-        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
-        val_loader   = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, num_workers=4)
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
+                                  num_workers=4, pin_memory=True)
+        val_loader   = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False,
+                                  num_workers=4)
 
-        model = MultiTaskFashionModel(backbone_name=args.backbone, use_keypoints=True).to(device)
+        model = MultiTaskFashionModel(backbone_name=args.backbone,
+                                      use_keypoints=True).to(device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
         os.makedirs(args.save_dir, exist_ok=True)
         best_val = 1e9
+
+        # --- history for plots ---
+        train_losses = []
+        val_losses = []
+        macro_accs = []
+        macro_f1s = []
+        last_per_attr_acc = None
+        last_confusion = None
+
         for epoch in range(1, args.epochs+1):
             train_loss = train_one_epoch(model, train_loader, optimizer, device)
-            val_loss = evaluate(model, val_loader, device)
-            print(f"Epoch {epoch}: train_loss={train_loss:.4f} val_loss={val_loss:.4f}")
+            (val_loss,
+             per_attr_acc,
+             macro_acc,
+             per_attr_f1,
+             macro_f1,
+             confusion) = evaluate(model, val_loader, device)
+
+            train_losses.append(train_loss)
+            val_losses.append(val_loss)
+            macro_accs.append(macro_acc if macro_acc is not None else 0.0)
+            macro_f1s.append(macro_f1 if macro_f1 is not None else 0.0)
+
+            last_per_attr_acc = per_attr_acc
+            last_confusion = confusion
+
+            print(f"Epoch {epoch}: "
+                  f"train_loss={train_loss:.4f} "
+                  f"val_loss={val_loss:.4f} "
+                  f"macro_acc={macro_acc:.4f} "
+                  f"macro_f1={macro_f1:.4f}")
+
             if val_loss < best_val:
                 best_val = val_loss
                 torch.save({'model_state': model.state_dict(),
                             'optimizer_state': optimizer.state_dict()},
                            os.path.join(args.save_dir, 'best.pth'))
+
+        # ========== AFTER TRAINING: MAKE PLOTS ==========
+
+        epochs = range(1, args.epochs+1)
+
+        # 1) Loss curve
+        plt.figure()
+        plt.plot(epochs, train_losses, label="Train Loss")
+        plt.plot(epochs, val_losses, label="Val Loss")
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.title("Training / Validation Loss")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(args.save_dir, "loss_curve.png"))
+        plt.close()
+
+        # 2) Macro accuracy & macro F1 curve
+        plt.figure()
+        plt.plot(epochs, macro_accs, label="Macro Accuracy")
+        plt.plot(epochs, macro_f1s, label="Macro F1")
+        plt.xlabel("Epoch")
+        plt.ylabel("Score")
+        plt.title("Macro Accuracy / Macro F1")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(args.save_dir, "macro_metrics.png"))
+        plt.close()
+
+        # 3) Per-attribute accuracy (bar chart, last epoch)
+        if last_per_attr_acc is not None:
+            attrs = list(last_per_attr_acc.keys())
+            accs = [last_per_attr_acc[a] if last_per_attr_acc[a] is not None else 0.0
+                    for a in attrs]
+
+            plt.figure(figsize=(10, 4))
+            x = np.arange(len(attrs))
+            plt.bar(x, accs)
+            plt.xticks(x, attrs, rotation=45, ha="right")
+            plt.ylabel("Accuracy")
+            plt.ylim(0.0, 1.0)
+            plt.title("Per-Attribute Accuracy (Shape, last epoch)")
+            plt.tight_layout()
+            plt.savefig(os.path.join(args.save_dir, "per_attribute_accuracy.png"))
+            plt.close()
+
+        # 4) Confusion matrix for one key attribute (e.g., sleeve_length)
+        if last_confusion is not None and last_confusion["sleeve_length"] is not None:
+            cm = last_confusion["sleeve_length"]
+            labels = SHAPE_LABELS["sleeve_length"]
+
+            plt.figure(figsize=(6, 5))
+            plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+            plt.title("Confusion Matrix - sleeve_length")
+            plt.colorbar()
+            tick_marks = np.arange(len(labels))
+            plt.xticks(tick_marks, labels, rotation=45, ha="right")
+            plt.yticks(tick_marks, labels)
+
+            plt.xlabel("Predicted")
+            plt.ylabel("True")
+            plt.tight_layout()
+            plt.savefig(os.path.join(args.save_dir, "cm_sleeve_length.png"))
+            plt.close()
+
 
     else: # infer
         assert args.image is not None, 'Provide --image for inference'
@@ -691,17 +785,16 @@ def main():
             print(f"[Warning] Checkpoint not found at {ckpt}. Using randomly initialized model.")
         model = model.to(device)
 
-        decoded, region_colors = infer_single(model, args.image, device, transforms_img)
+        decoded= infer_single(model, args.image, device, transforms_img)
 
         result = {
             "attributes": decoded,
-            "region_colors": region_colors
         }
         print('Inference results:')
         print(json.dumps(result, indent=2, ensure_ascii=False))
 
         # also dump a visualization overlay to inspect regions
-        visualize_color_regions(args.image, "vis_color_regions.png")
+
 
 if __name__ == '__main__':
     main()
