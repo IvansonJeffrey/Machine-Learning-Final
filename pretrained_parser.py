@@ -678,7 +678,9 @@ def visualize_parsed_regions(
     img_rgb: np.ndarray,
     masks: Dict[str, np.ndarray],
     save_path: str = "parsed_regions_visualization.png",
-    show: bool = False
+    show: bool = False,
+    matched_colors: Optional[Dict[str, Dict]] = None,
+    color_confidences: Optional[Dict[str, float]] = None
 ) -> None:
     """
     Visualize parsed clothing regions with color overlays using matplotlib.
@@ -688,6 +690,8 @@ def visualize_parsed_regions(
         masks: Dict with keys "head", "shirt", "pants", "shoes", each containing boolean mask
         save_path: Path to save visualization
         show: Whether to display the visualization
+        matched_colors: Optional dict with color info per region (from extract_colors_guided_by_classifier)
+        color_confidences: Optional dict with confidence scores per region
     """
     if not MATPLOTLIB_AVAILABLE:
         print("[Warning] Matplotlib not available. Using simple PIL visualization instead.")
@@ -734,22 +738,59 @@ def visualize_parsed_regions(
     axes[1].set_title("Parsed Regions (Overlay)", fontsize=14, fontweight='bold')
     axes[1].axis('off')
     
-    # Add legend
+    # Add legend with hex codes, color squares, and confidence
     legend_elements = []
     for region_name, color in region_colors.items():
         if region_name in masks and masks[region_name].sum() > 0:
             # Count pixels in region
             pixel_count = masks[region_name].sum()
             percentage = (pixel_count / masks[region_name].size) * 100
+            
+            # Build label with hex code and confidence
+            label_parts = [f"{region_name.capitalize()}", f"({pixel_count} px, {percentage:.1f}%)"]
+            
+            # Get actual extracted color for the patch if available, otherwise use overlay color
+            patch_color = [c/255.0 for c in color[:3]]
+            hex_code = None
+            
+            if matched_colors and region_name in matched_colors:
+                region_color_data = matched_colors[region_name]
+                hex_code = region_color_data.get('hex')
+                if hex_code:
+                    # Parse hex code to RGB for patch color
+                    hex_clean = hex_code.lstrip('#')
+                    if len(hex_clean) == 6:
+                        try:
+                            r = int(hex_clean[0:2], 16)
+                            g = int(hex_clean[2:4], 16)
+                            b = int(hex_clean[4:6], 16)
+                            patch_color = [r/255.0, g/255.0, b/255.0]
+                            label_parts.append(f"Hex: {hex_code}")
+                        except ValueError:
+                            pass  # Use overlay color if hex parsing fails
+            
+            # Add confidence if available
+            if color_confidences and region_name in color_confidences:
+                conf = color_confidences[region_name]
+                conf_percent = conf * 100
+                label_parts.append(f"Conf: {conf_percent:.1f}%")
+            
+            label_text = "\n".join(label_parts)
+            
             legend_elements.append(
                 mpatches.Patch(
-                    facecolor=[c/255.0 for c in color[:3]],
-                    label=f"{region_name.capitalize()} ({pixel_count} px, {percentage:.1f}%)"
+                    facecolor=patch_color,
+                    label=label_text,
+                    edgecolor='black',
+                    linewidth=1.5
                 )
             )
     
     if legend_elements:
-        axes[1].legend(handles=legend_elements, loc='upper right', fontsize=10)
+        # Position legend with better spacing
+        axes[1].legend(handles=legend_elements, loc='upper right', fontsize=9, 
+                      framealpha=0.95, handlelength=2.5, handletextpad=0.8,
+                      borderpad=0.8, labelspacing=1.2)
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')

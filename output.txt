@@ -1,8 +1,8 @@
 {
   "categories": [
-    "grey tank top",
-    "dark grey shorts",
-    "dark grey leggings"
+    "grey Tank_Top",
+    "dark grey Shorts",
+    "Shoes"
   ],
   "attributes": {
     "sleeve_length": "sleeveless",
