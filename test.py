@@ -230,7 +230,7 @@ class DeepFashionMM(Dataset):
 # Model
 # -----------------------------
 class MultiTaskFashionModel(nn.Module):
-    def __init__(self, backbone_name: str = 'resnet50', use_keypoints: bool = True, use_segmentation: bool = False):
+    def __init__(self, backbone_name: str = 'resnet50', use_keypoints: bool = True, use_segmentation: bool = False, use_parsing_attention: bool = False):
         super().__init__()
         assert backbone_name in ['resnet50','resnet18']
         if backbone_name == 'resnet50':
@@ -240,8 +240,34 @@ class MultiTaskFashionModel(nn.Module):
             self.backbone = models.resnet18(pretrained=True)
             feat_dim = 512
 
-        # remove final fc
-        self.backbone.fc = nn.Identity()
+        # Store original forward for backward compatibility
+        self._original_forward = self.backbone.forward
+        
+        # For region-aware features, we need spatial features before global pooling
+        self.use_parsing_attention = use_parsing_attention
+        if use_parsing_attention:
+            # Remove avgpool and fc to get spatial features
+            if backbone_name == 'resnet50':
+                # ResNet50 structure: conv -> bn -> relu -> maxpool -> layer1 -> layer2 -> layer3 -> layer4 -> avgpool -> fc
+                # We'll use layer4 output which is [B, 2048, H/32, W/32]
+                self.backbone.avgpool = nn.Identity()
+                self.backbone.fc = nn.Identity()
+                # We'll add our own pooling later
+                self.spatial_feat_dim = 2048
+            else:
+                self.backbone.avgpool = nn.Identity()
+                self.backbone.fc = nn.Identity()
+                self.spatial_feat_dim = 512
+            
+            # Region-aware feature projection (if spatial dim != feat_dim)
+            if self.spatial_feat_dim != feat_dim:
+                self.region_proj = nn.Linear(self.spatial_feat_dim, feat_dim)
+            else:
+                self.region_proj = nn.Identity()
+        else:
+            # Original behavior: global average pooling
+            self.backbone.fc = nn.Identity()
+            self.backbone.avgpool = nn.AdaptiveAvgPool2d(1) if not hasattr(self.backbone, 'avgpool') or self.backbone.avgpool is None else self.backbone.avgpool
 
         self.use_keypoints = use_keypoints
         kp_dim = 64
@@ -279,9 +305,48 @@ class MultiTaskFashionModel(nn.Module):
         else:
             self.seg_decoder = None
 
-    def forward(self, x_image, x_kp=None):
+    def forward(self, x_image, x_kp=None, parsing_mask=None):
         # backbone expects 3xHxW
-        feat = self.backbone(x_image)  # [B, feat_dim]
+        if self.use_parsing_attention and parsing_mask is not None:
+            # Extract spatial features manually
+            x = self.backbone.conv1(x_image)
+            x = self.backbone.bn1(x)
+            x = self.backbone.relu(x)
+            x = self.backbone.maxpool(x)
+            x = self.backbone.layer1(x)
+            x = self.backbone.layer2(x)
+            x = self.backbone.layer3(x)
+            spatial_feat = self.backbone.layer4(x)  # [B, C, H', W']
+            
+            # Use parsing mask to weight features
+            # Resize parsing mask to match spatial feature size
+            B, C, H, W = spatial_feat.shape
+            if len(parsing_mask.shape) == 2:  # [H, W] -> [1, 1, H, W]
+                parsing_mask = parsing_mask.unsqueeze(0).unsqueeze(0)
+            elif len(parsing_mask.shape) == 3:  # [B, H, W] -> [B, 1, H, W]
+                parsing_mask = parsing_mask.unsqueeze(1)
+            
+            parsing_resized = F.interpolate(
+                parsing_mask.float(), 
+                size=(H, W), 
+                mode='nearest'
+            )  # [B, 1, H', W']
+            
+            # Create region attention weights
+            # Focus on relevant regions: top (1), outer (2), pants (5), shoes (11)
+            relevant_regions = torch.zeros_like(parsing_resized)
+            for region_id in [1, 2, 5, 11]:  # top, outer, pants, shoes
+                relevant_regions += (parsing_resized == region_id).float()
+            
+            # Weight features by relevant regions (boost clothing regions by 50%)
+            weighted_feat = spatial_feat * (1.0 + 0.5 * relevant_regions)  # Boost relevant regions
+            feat = F.adaptive_avg_pool2d(weighted_feat, 1).flatten(1)  # [B, spatial_feat_dim]
+            
+            # Project to original feature dimension
+            feat = self.region_proj(feat)  # [B, feat_dim]
+        else:
+            # Original behavior: global average pooling
+            feat = self.backbone(x_image)  # [B, feat_dim]
 
         if self.use_keypoints and x_kp is not None:
             kp_feat = self.kp_mlp(x_kp)
@@ -507,10 +572,17 @@ def evaluate(model, dataloader, device):
 # Inference util
 # -----------------------------
 
-def infer_single(model, image_path: str, device: torch.device, transforms_img):
+def infer_single(model, image_path: str, device: torch.device, transforms_img, parsing_mask=None):
     """
     Run attribute prediction + region-based color detection
     on a single image.
+    
+    Args:
+        model: The classification model
+        image_path: Path to input image
+        device: torch device
+        transforms_img: Image transforms
+        parsing_mask: Optional parsing mask tensor [H, W] or [1, H, W] for region-aware attention
     """
     model.eval()
 
@@ -521,9 +593,27 @@ def infer_single(model, image_path: str, device: torch.device, transforms_img):
     # Preprocess image for model
     x = transforms_img(img).unsqueeze(0).to(device)
     kp = torch.full((1,42), -1.0, dtype=torch.float32).to(device)
+    
+    # Prepare parsing mask if provided
+    parsing_tensor = None
+    if parsing_mask is not None:
+        if isinstance(parsing_mask, np.ndarray):
+            parsing_tensor = torch.from_numpy(parsing_mask).long().to(device)
+        else:
+            parsing_tensor = parsing_mask.to(device)
+        # Ensure it matches the model's expected input size
+        _, _, h_model, w_model = x.shape
+        if len(parsing_tensor.shape) == 2:  # [H, W]
+            parsing_tensor = parsing_tensor.unsqueeze(0)  # [1, H, W]
+        # Resize to match model input
+        parsing_tensor = F.interpolate(
+            parsing_tensor.float().unsqueeze(1), 
+            size=(h_model, w_model), 
+            mode='nearest'
+        ).squeeze(1).long()  # [1, H, W]
 
     with torch.no_grad():
-        outs = model(x, kp)
+        outs = model(x, kp, parsing_mask=parsing_tensor)
 
     outs_squeezed = {k: v[0].cpu() for k,v in outs.items()}
     decoded = decode_predictions(outs_squeezed)
@@ -540,10 +630,10 @@ def infer_single(model, image_path: str, device: torch.device, transforms_img):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_root', type=str,
-                        default=r"C:\Users\Jeffrey M. Ivanson\Documents\MLDEMO\dataset",
+                        default="./dataset",
                         help='Path to dataset')
     parser.add_argument('--mode', type=str, choices=['train','infer'], default='infer')
-    parser.add_argument('--image', type=str, default=r"C:\Users\Jeffrey M. Ivanson\Documents\MLDEMO\54503.jpg", help='Path to input image for inference')
+    parser.add_argument('--image', type=str, default=None, help='Path to input image for inference')
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--lr', type=float, default=1e-4)

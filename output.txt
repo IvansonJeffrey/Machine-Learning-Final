@@ -1,7 +1,13 @@
 {
+  "categories": [
+    "green long-sleeve shirt",
+    "light grey pants",
+    "light grey leggings",
+    "dark grey shoes"
+  ],
   "attributes": {
-    "sleeve_length": "short-sleeve",
-    "lower_length": "medium-short",
+    "sleeve_length": "long-sleeve",
+    "lower_length": "long",
     "socks": "no",
     "hat": "no",
     "glasses": "no",
@@ -14,61 +20,89 @@
     "upper_cover_navel": "yes",
     "fabric_0": "cotton",
     "fabric_1": "cotton",
-    "fabric_2": "NA",
-    "color_0": "graphic",
+    "fabric_2": "cotton",
+    "color_0": "pure-color",
     "color_1": "pure-color",
-    "color_2": "NA"
+    "color_2": "pure-color"
+  },
+  "region_colors": {
+    "head": {
+      "hex": "#536852",
+      "name": "green",
+      "rgb": [
+        83,
+        104,
+        82
+      ],
+      "pattern": null,
+      "classifier_source": null
+    },
+    "shirt": {
+      "hex": "#19513A",
+      "name": "green",
+      "rgb": [
+        25,
+        81,
+        58
+      ],
+      "pattern": "pure-color",
+      "classifier_source": "color_0"
+    },
+    "pants": {
+      "hex": "#D2D2D3",
+      "name": "light grey",
+      "rgb": [
+        210,
+        210,
+        211
+      ],
+      "pattern": "pure-color",
+      "classifier_source": "color_1"
+    },
+    "shoes": {
+      "hex": "#414047",
+      "name": "dark grey",
+      "rgb": [
+        65,
+        64,
+        71
+      ],
+      "pattern": "pure-color",
+      "classifier_source": "color_2"
+    }
+  },
+  "color_confidence": {
+    "overall": 0.8971972953880311,
+    "per_region": {
+      "shirt": 1.0,
+      "pants": 1.0,
+      "shoes": 0.6915918861640933
+    }
   },
   "region_colors_vertical": {
     "upper_body": {
       "rgb": [
-        93,
-        86,
-        86
+        52,
+        97,
+        77
       ],
-      "hex": "#5D5656"
+      "hex": "#34614D"
     },
     "lower_body": {
       "rgb": [
-        128,
-        115,
-        111
+        221,
+        221,
+        222
       ],
-      "hex": "#80736F"
+      "hex": "#DDDDDE"
     },
     "shoes": {
       "rgb": [
-        194,
-        174,
-        151
+        218,
+        218,
+        219
       ],
-      "hex": "#C2AE97"
-    }
-  },
-  "region_colors_parsing": {
-    "top": {
-      "hex": "#877D7A",
-      "name": "grey"
-    },
-    "outer": {
-      "hex": null,
-      "name": null
-    },
-    "skirt": {
-      "hex": null,
-      "name": null
-    },
-    "pants": {
-      "hex": "#403E48",
-      "name": "dark grey"
-    },
-    "leggings": {
-      "hex": "#93705D",
-      "name": "orange"
-    },
-    "shoes": {
-      "hex": "#847878",
-      "name": "grey"
+      "hex": "#DADADB"
     }
   }
 }
