@@ -194,13 +194,17 @@ def format_style_data_for_chatgpt(
                 region_data = parsing_region_colors.get(region, {})
                 region_conf = color_confidences.get(region, 0.0)
                 
-                # Only include if confidence is above threshold
-                if region_data.get('name') and region_conf >= confidence_threshold:
+                # Only include if confidence is above threshold AND pattern is pure-color
+                pattern = region_data.get('pattern')
+                if region_data.get('name') and region_conf >= confidence_threshold and pattern == 'pure-color':
                     hex_color = region_data.get('hex', 'N/A')
                     match_info = ""
-                    if region_data.get('classifier_match'):
-                        match_info = f" [matches {region_data['classifier_match']}]"
+                    if region_data.get('classifier_source'):
+                        match_info = f" [source: {region_data['classifier_source']}]"
                     details.append(f"{region.capitalize()}: {region_data['name']} ({hex_color}){match_info}")
+                elif pattern and pattern != 'pure-color':
+                    # Include pattern info for non-pure-color patterns
+                    details.append(f"{region.capitalize()}: pattern={pattern} (no single RGB color available)")
         else:
             details.append("\n=== REGION COLORS ===")
             details.append(f"[Note: Color extraction confidence ({overall_conf:.1%}) below threshold ({confidence_threshold:.1%}). "
@@ -211,12 +215,16 @@ def format_style_data_for_chatgpt(
         region_order = ['head', 'shirt', 'pants', 'shoes', 'outer', 'top', 'leggings', 'skirt']
         for region in region_order:
             region_data = parsing_region_colors.get(region, {})
-            if region_data.get('name'):
+            pattern = region_data.get('pattern')
+            if region_data.get('name') and pattern == 'pure-color':
                 hex_color = region_data.get('hex', 'N/A')
                 match_info = ""
-                if region_data.get('classifier_match'):
-                    match_info = f" [matches {region_data['classifier_match']}]"
+                if region_data.get('classifier_source'):
+                    match_info = f" [source: {region_data['classifier_source']}]"
                 details.append(f"{region.capitalize()}: {region_data['name']} ({hex_color}){match_info}")
+            elif pattern and pattern != 'pure-color':
+                # Include pattern info for non-pure-color patterns
+                details.append(f"{region.capitalize()}: pattern={pattern} (no single RGB color available)")
     
     # === ACCESSORIES ===
     details.append("\n=== ACCESSORIES ===")
@@ -448,6 +456,17 @@ def main():
         attr_model, args.image, device, transforms_img, parsing_mask=None
     )
     vertical_region_colors = {}  # Legacy feature, not used anymore
+    
+    # === 4.5) Adjust masks based on classifier results (e.g., remove legs for shorts) ===
+    from pretrained_parser import remove_legs_from_pants_mask
+    is_shorts = decoded_attrs.get('lower_length') in ['three-point', 'medium-short']
+    if is_shorts and "pants" in region_masks and region_masks["pants"].sum() > 0:
+        print(f"[Info] Classifier detected shorts (lower_length: {decoded_attrs.get('lower_length')}). Adjusting pants mask...")
+        original_pants_pixels = region_masks["pants"].sum()
+        region_masks["pants"] = remove_legs_from_pants_mask(img_rgb, region_masks["pants"], is_shorts=True)
+        removed_pixels = original_pants_pixels - region_masks["pants"].sum()
+        if removed_pixels > 0:
+            print(f"[Info] Removed {removed_pixels} leg/skin pixels from pants mask ({removed_pixels/original_pants_pixels:.1%} reduction)")
     
     # === 5) Extract colors using classifier predictions as guide ===
     # Get classifier color predictions (color_0, color_1, color_2)

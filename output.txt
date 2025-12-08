@@ -1,95 +1,78 @@
 {
   "categories": [
-    "green long-sleeve shirt",
-    "light grey pants",
-    "light grey leggings",
-    "dark grey shoes"
+    "grey tank top",
+    "dark grey shorts",
+    "dark grey leggings"
   ],
   "attributes": {
-    "sleeve_length": "long-sleeve",
-    "lower_length": "long",
+    "sleeve_length": "sleeveless",
+    "lower_length": "three-point",
     "socks": "no",
     "hat": "no",
     "glasses": "no",
     "neckwear": "no",
     "wristwear": "no",
-    "ring": "NA",
+    "ring": "no",
     "waist_accessory": "hidden",
-    "neckline": "round",
+    "neckline": "NA",
     "outer_cardigan": "no",
-    "upper_cover_navel": "yes",
+    "upper_cover_navel": "NA",
     "fabric_0": "cotton",
     "fabric_1": "cotton",
-    "fabric_2": "cotton",
+    "fabric_2": "NA",
     "color_0": "pure-color",
     "color_1": "pure-color",
-    "color_2": "pure-color"
+    "color_2": "NA"
   },
   "region_colors": {
     "head": {
-      "hex": "#536852",
-      "name": "green",
+      "hex": "#858074",
+      "name": "grey",
       "rgb": [
-        83,
-        104,
-        82
+        133,
+        128,
+        116
       ],
       "pattern": null,
       "classifier_source": null
     },
     "shirt": {
-      "hex": "#19513A",
-      "name": "green",
+      "hex": "#6B6771",
+      "name": "grey",
       "rgb": [
-        25,
-        81,
-        58
+        107,
+        103,
+        113
       ],
       "pattern": "pure-color",
       "classifier_source": "color_0"
     },
     "pants": {
-      "hex": "#D2D2D3",
-      "name": "light grey",
+      "hex": "#423C43",
+      "name": "dark grey",
       "rgb": [
-        210,
-        210,
-        211
+        66,
+        60,
+        67
       ],
       "pattern": "pure-color",
       "classifier_source": "color_1"
     },
     "shoes": {
-      "hex": "#414047",
-      "name": "dark grey",
-      "rgb": [
-        65,
-        64,
-        71
-      ],
-      "pattern": "pure-color",
-      "classifier_source": "color_2"
+      "hex": null,
+      "name": null,
+      "rgb": null,
+      "pattern": null,
+      "classifier_source": null
     }
   },
   "color_confidence": {
-    "overall": 0.8971972953880311,
+    "overall": 0.7298263038548752,
     "per_region": {
       "shirt": 1.0,
-      "pants": 1.0,
-      "shoes": 0.6915918861640933
+      "pants": 0.9498680272108844,
+      "shoes": 0.2396108843537415
     }
   },
-  "region_colors_vertical": {},
-  "style_evaluation": {
-    "rating": "good",
-    "score": 7,
-    "feedback": "The outfit demonstrates an overall good balance of colors and fit. The long-sleeve green shirt provides a fresh pop of color, while the light grey pants offer a neutral base that allows the top to stand out. The dark grey shoes create a nice gradient effect with the pants, maintaining a cohesive look. However, the outfit could benefit from the addition of more accessories or a statement piece to elevate it further. The use of 100% cotton fabric is great for comfort and breathability, making it suitable for casual settings. However, the lack of texture variety in the outfit could make it appear somewhat flat. The hidden waist accessory is a unique touch, but its invisibility under the clothing limits its potential impact on the overall look. In terms of modern fashion trends, the outfit aligns well but lacks a distinctive flair to make a strong style statement.",
-    "suggestions": [
-      "Consider incorporating a textured fabric in one of the pieces, like a knitted sweater or a denim jacket, to add depth to the outfit.",
-      "Add a statement accessory, such as a bold belt or a colorful scarf, to enhance the visual interest and draw attention to the waist area.",
-      "Experiment with shoes that have a bit more character, such as sneakers with a unique design or ankle boots, to add personality to the look."
-    ],
-    "color_confidence": 0.8971972953880311,
-    "color_confidence_note": "High - color information included"
-  }
+  "region_colors_vertical": {}
 }

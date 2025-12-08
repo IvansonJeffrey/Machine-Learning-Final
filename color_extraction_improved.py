@@ -271,8 +271,12 @@ def extract_colors_kmeans(img_np: np.ndarray, n_clusters: int = 5) -> Dict[str, 
     
     # Map colors to regions based on vertical position
     # Find where each cluster is most common
-    labels_full = np.zeros(h * w, dtype=int)
+    labels_full = np.full(h * w, -1, dtype=int)  # Use -1 for invalid pixels
     labels_full[valid_mask] = labels
+    
+    # Track which pixels are valid in the full image
+    valid_mask_full = np.zeros((h, w), dtype=bool)
+    valid_mask_full.reshape(-1)[valid_mask] = True
     
     # Define vertical regions
     top_region_mask = np.zeros((h, w), dtype=bool)
@@ -288,10 +292,16 @@ def extract_colors_kmeans(img_np: np.ndarray, n_clusters: int = 5) -> Dict[str, 
     
     # Find dominant color in each region
     for region_name, region_mask in [("top", top_region_mask), ("pants", pants_region_mask), ("shoes", shoes_region_mask)]:
-        region_labels = labels_full[region_mask.reshape(-1)]
-        if len(region_labels) > 0:
+        # Only consider valid pixels in this region
+        valid_region_mask = region_mask & valid_mask_full
+        region_labels = labels_full[valid_region_mask.reshape(-1)]
+        
+        # Filter out invalid labels (-1)
+        valid_region_labels = region_labels[region_labels >= 0]
+        
+        if len(valid_region_labels) > 0:
             # Find most common cluster in this region
-            region_clusters, counts = np.unique(region_labels, return_counts=True)
+            region_clusters, counts = np.unique(valid_region_labels, return_counts=True)
             if len(region_clusters) > 0:
                 dominant_cluster = region_clusters[np.argmax(counts)]
                 r, g, b = colors[dominant_cluster].tolist()
@@ -306,10 +316,12 @@ def extract_colors_kmeans(img_np: np.ndarray, n_clusters: int = 5) -> Dict[str, 
     
     # Outer region: use second most common color from top region
     if "top" in results and results["top"]["hex"]:
-        # Find second most common cluster in top region
-        top_labels = labels_full[top_region_mask.reshape(-1)]
-        if len(top_labels) > 0:
-            top_clusters, top_counts = np.unique(top_labels, return_counts=True)
+        # Find second most common cluster in top region (only valid pixels)
+        valid_top_mask = top_region_mask & valid_mask_full
+        top_labels = labels_full[valid_top_mask.reshape(-1)]
+        valid_top_labels = top_labels[top_labels >= 0]
+        if len(valid_top_labels) > 0:
+            top_clusters, top_counts = np.unique(valid_top_labels, return_counts=True)
             if len(top_clusters) > 1:
                 # Get second most common
                 sorted_top = np.argsort(top_counts)[::-1]
