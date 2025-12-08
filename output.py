@@ -339,7 +339,7 @@ def format_style_data_for_chatgpt(
         
         if overall_conf >= confidence_threshold:
             details.append("\n=== REGION COLORS (from segmentation) ===")
-            region_order = ['head', 'shirt', 'pants', 'shoes', 'outer', 'top', 'leggings', 'skirt']
+            region_order = ['shirt', 'pants', 'shoes', 'outer', 'top', 'leggings', 'skirt']
             for region in region_order:
                 region_data = parsing_region_colors.get(region, {})
                 region_conf = color_confidences.get(region, 0.0)
@@ -362,7 +362,7 @@ def format_style_data_for_chatgpt(
     else:
         # Fallback: include colors anyway if no confidence info available
         details.append("\n=== REGION COLORS (from segmentation) ===")
-        region_order = ['head', 'shirt', 'pants', 'shoes', 'outer', 'top', 'leggings', 'skirt']
+        region_order = ['shirt', 'pants', 'shoes', 'outer', 'top', 'leggings', 'skirt']
         for region in region_order:
             region_data = parsing_region_colors.get(region, {})
             pattern = region_data.get('pattern')
@@ -580,7 +580,7 @@ def main():
     attr_model = attr_model.to(device)
 
     # === 3) Parse clothing regions using pre-trained parser ===
-    print("[Info] Parsing clothing regions (head, shirt, pants, shoes)...")
+    print("[Info] Parsing clothing regions (shirt, pants, shoes)...")
     vis_path = "parsed_regions_visualization.png"
     img_rgb, region_masks = parse_clothing_regions(
         args.image, 
@@ -718,7 +718,7 @@ def main():
     result = {
         "categories": categories,  # ["grey jacket", "purple pants", "orange shoes"]
         "attributes": decoded_attrs,                # sleeve_length, color_0, color_1, color_2, etc. (always included)
-        "region_colors": matched_colors,            # head, shirt, pants, shoes with classifier matches
+        "region_colors": matched_colors,            # shirt, pants, shoes with classifier matches
         "color_confidence": {
             "overall": overall_color_confidence,
             "per_region": color_confidences

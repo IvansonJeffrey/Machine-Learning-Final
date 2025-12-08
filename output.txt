@@ -5,8 +5,8 @@
     "Shoes"
   ],
   "attributes": {
-    "sleeve_length": "sleeveless",
-    "lower_length": "three-point",
+    "sleeve_length": "short-sleeve",
+    "lower_length": "long",
     "socks": "no",
     "hat": "no",
     "glasses": "no",
@@ -14,46 +14,35 @@
     "wristwear": "no",
     "ring": "no",
     "waist_accessory": "hidden",
-    "neckline": "NA",
+    "neckline": "round",
     "outer_cardigan": "no",
-    "upper_cover_navel": "NA",
+    "upper_cover_navel": "yes",
     "fabric_0": "cotton",
-    "fabric_1": "cotton",
+    "fabric_1": "denim",
     "fabric_2": "NA",
     "color_0": "pure-color",
     "color_1": "pure-color",
     "color_2": "NA"
   },
   "region_colors": {
-    "head": {
-      "hex": "#858074",
-      "name": "grey",
-      "rgb": [
-        133,
-        128,
-        116
-      ],
-      "pattern": null,
-      "classifier_source": null
-    },
     "shirt": {
-      "hex": "#6B6771",
+      "hex": "#675E69",
       "name": "grey",
       "rgb": [
-        107,
         103,
-        113
+        94,
+        105
       ],
       "pattern": "pure-color",
       "classifier_source": "color_0"
     },
     "pants": {
-      "hex": "#423C43",
-      "name": "dark grey",
+      "hex": "#345B8F",
+      "name": "blue",
       "rgb": [
-        66,
-        60,
-        67
+        52,
+        91,
+        143
       ],
       "pattern": "pure-color",
       "classifier_source": "color_1"
@@ -67,11 +56,11 @@
     }
   },
   "color_confidence": {
-    "overall": 0.7298263038548752,
+    "overall": 0.6255120181405895,
     "per_region": {
-      "shirt": 1.0,
-      "pants": 0.9498680272108844,
-      "shoes": 0.2396108843537415
+      "shirt": 0.600404081632653,
+      "pants": 1.0,
+      "shoes": 0.2761319727891156
     }
   },
   "region_colors_vertical": {}

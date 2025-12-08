@@ -1,6 +1,6 @@
 """
 Pre-trained Human Parsing Model for Clothing Segmentation
-Segments: head, shirt, pants, shoes
+Segments: shirt, pants, shoes
 Uses pre-trained models that work out-of-the-box without training.
 """
 
@@ -124,16 +124,25 @@ def rgb_to_color_name(r: int, g: int, b: int) -> str:
     return "other"
 
 
-def extract_color_from_region(img_rgb: np.ndarray, mask: np.ndarray, region_name: Optional[str] = None) -> Dict[str, Optional[str]]:
+def extract_color_from_region(img_rgb: np.ndarray, mask: np.ndarray, region_name: Optional[str] = None, exclude_mask: Optional[np.ndarray] = None) -> Dict[str, Optional[str]]:
     """
     Extract dominant color from a region mask.
     
     Args:
         img_rgb: RGB image array [H, W, 3]
         mask: Boolean mask for the region [H, W]
-        region_name: Optional region name (e.g., "pants", "shirt", "top") to apply region-specific filtering
+        region_name: Optional region name (e.g., "pants", "shirt", "top", "shoes") to apply region-specific filtering
                      For pants/shirt/top regions, skin-colored pixels are filtered out (helps with shorts/short sleeves)
+                     For shoes region, pants-colored pixels are filtered out to prevent contamination
+        exclude_mask: Optional mask of pixels to exclude (e.g., pants mask when extracting shoes color)
     """
+    if mask.sum() == 0:
+        return {"hex": None, "name": None, "rgb": None}
+    
+    # Remove pixels that overlap with exclude_mask (e.g., exclude pants pixels from shoes)
+    if exclude_mask is not None:
+        mask = mask & (~exclude_mask)
+    
     if mask.sum() == 0:
         return {"hex": None, "name": None, "rgb": None}
     
@@ -193,7 +202,7 @@ def load_smp_parser(model_name: str = "deeplabv3plus_resnet50") -> Optional[torc
             encoder_name="resnet50",
             encoder_weights="imagenet",
             in_channels=3,
-            classes=4,  # head, shirt, pants, shoes
+            classes=3,  # shirt, pants, shoes
             activation=None,
         )
         model.eval()
@@ -225,10 +234,17 @@ def parse_with_smp(model: torch.nn.Module, image_path: str, device: torch.device
     # Resize prediction back to original size
     pred = cv2.resize(pred.astype(np.uint8), (w, h), interpolation=cv2.INTER_NEAREST)
     
-    # Create masks for each region
+    # Detect head region to exclude from shirt
+    head_mask = detect_head_region_mediapipe(img_np)
+    
+    # Create masks for each region (excluding head from shirt)
+    shirt_mask = (pred == 1)
+    # Remove head pixels from shirt mask
+    if head_mask is not None:
+        shirt_mask = shirt_mask & (~head_mask)
+    
     masks = {
-        "head": (pred == 0),
-        "shirt": (pred == 1),
+        "shirt": shirt_mask,
         "pants": (pred == 2),
         "shoes": (pred == 3),
     }
@@ -244,18 +260,26 @@ def parse_with_geometric(img_rgb: np.ndarray) -> Dict[str, np.ndarray]:
     """
     Simple geometric parser that divides image into regions.
     This is a fallback that always works, though less accurate.
+    Uses detected head region to exclude from shirt (if available).
     """
     h, w = img_rgb.shape[:2]
     masks = {}
     
-    # Head: top 20% of image
-    head_mask = np.zeros((h, w), dtype=bool)
-    head_mask[:int(h * 0.20), :] = True
-    masks["head"] = head_mask
+    # Try to detect head region (more precise)
+    head_mask = detect_head_region_mediapipe(img_rgb)
+    if head_mask is None or head_mask.sum() == 0:
+        # No head detected, just use top 15% as head estimate
+        head_y = int(h * 0.15)
+        head_mask = np.zeros((h, w), dtype=bool)
+        head_mask[:head_y, :] = True
     
-    # Shirt: 20% to 50% of image
+    # Shirt: 15% to 50% of image (EXCLUDES detected head only)
+    shirt_y_start = int(h * 0.15)  # Start slightly lower to preserve shirt area
     shirt_mask = np.zeros((h, w), dtype=bool)
-    shirt_mask[int(h * 0.20):int(h * 0.50), :] = True
+    shirt_mask[shirt_y_start:int(h * 0.50), :] = True
+    # Remove only the detected head pixels (more precise)
+    if head_mask is not None:
+        shirt_mask = shirt_mask & (~head_mask)
     masks["shirt"] = shirt_mask
     
     # Pants: 50% to 85% of image
@@ -275,6 +299,61 @@ def parse_with_geometric(img_rgb: np.ndarray) -> Dict[str, np.ndarray]:
 # METHOD 3: Using MediaPipe (if available)
 # =========================
 
+def detect_head_region_mediapipe(img_rgb: np.ndarray) -> Optional[np.ndarray]:
+    """Detect head/face region using MediaPipe Face Detection
+    Only excludes the actual detected face/head area, not the entire top portion.
+    """
+    try:
+        import mediapipe as mp
+        mp_face_detection = mp.solutions.face_detection
+        face_detection = mp_face_detection.FaceDetection(
+            model_selection=0,  # 0: short-range, 1: full-range
+            min_detection_confidence=0.5
+        )
+        
+        h, w = img_rgb.shape[:2]
+        results = face_detection.process(img_rgb)
+        
+        # Create mask from detected faces only (no geometric fallback)
+        head_mask = np.zeros((h, w), dtype=bool)
+        
+        if not results.detections:
+            # No face detected - don't exclude anything, return empty mask
+            return head_mask
+        
+        # Only exclude the actual detected face area
+        for detection in results.detections:
+            bbox = detection.location_data.relative_bounding_box
+            # Convert relative coordinates to pixel coordinates
+            x = int(bbox.xmin * w)
+            y = int(bbox.ymin * h)
+            width = int(bbox.width * w)
+            height = int(bbox.height * h)
+            
+            # Expand bounding box slightly to cover full head/face
+            # Use smaller expansion to avoid removing too much shirt area
+            expand_factor = 0.2  # Reduced from 0.3
+            x_expand = int(width * expand_factor)
+            y_expand = int(height * expand_factor)
+            x = max(0, x - x_expand)
+            y = max(0, y - y_expand)
+            width = min(w - x, width + 2 * x_expand)
+            height = min(h - y, height + 2 * y_expand)
+            
+            # Only mark the detected face area, not the entire top portion
+            head_mask[y:y+height, x:x+width] = True
+        
+        return head_mask
+    except ImportError:
+        # Fallback: return empty mask (don't exclude anything)
+        h, w = img_rgb.shape[:2]
+        return np.zeros((h, w), dtype=bool)
+    except Exception as e:
+        # Fallback: return empty mask (don't exclude anything)
+        h, w = img_rgb.shape[:2]
+        return np.zeros((h, w), dtype=bool)
+
+
 def parse_with_mediapipe(img_rgb: np.ndarray) -> Optional[Dict[str, np.ndarray]]:
     """Parse using MediaPipe Selfie Segmentation"""
     try:
@@ -291,17 +370,20 @@ def parse_with_mediapipe(img_rgb: np.ndarray) -> Optional[Dict[str, np.ndarray]]
         if person_mask.sum() == 0:
             return None
         
-        # Divide person mask into regions
+        # Detect head/face region to exclude from shirt
+        head_mask = detect_head_region_mediapipe(img_rgb)
+        
+        # Divide person mask into regions (excluding head from shirt)
         h, w = img_rgb.shape[:2]
         masks = {}
         
-        # Head: top 25% of person
-        head_y = int(h * 0.25)
-        masks["head"] = person_mask & (np.arange(h)[:, None] < head_y)
-        
-        # Shirt: 25% to 50% of person
-        shirt_y0, shirt_y1 = int(h * 0.25), int(h * 0.50)
-        masks["shirt"] = person_mask & (np.arange(h)[:, None] >= shirt_y0) & (np.arange(h)[:, None] < shirt_y1)
+        # Shirt: top 50% of person, but EXCLUDE only detected head/face region
+        shirt_y1 = int(h * 0.50)
+        shirt_mask = person_mask & (np.arange(h)[:, None] < shirt_y1)
+        # Remove only the detected head/face pixels (not entire top portion)
+        if head_mask is not None and head_mask.sum() > 0:
+            shirt_mask = shirt_mask & (~head_mask)
+        masks["shirt"] = shirt_mask
         
         # Pants: 50% to 85% of person
         pants_y0, pants_y1 = int(h * 0.50), int(h * 0.85)
@@ -440,13 +522,13 @@ def parse_clothing_regions(
     vis_save_path: str = "parsed_regions_visualization.png"
 ) -> Tuple[np.ndarray, Dict[str, np.ndarray]]:
     """
-    Parse image into clothing regions: head, shirt, pants, shoes
+    Parse image into clothing regions: shirt, pants, shoes
     Tries multiple methods in order of preference.
     Automatically removes legs from pants mask when shorts are detected.
     
     Returns:
         img_rgb: Original image as numpy array
-        masks: Dict with keys "head", "shirt", "pants", "shoes", each containing a boolean mask
+        masks: Dict with keys "shirt", "pants", "shoes", each containing a boolean mask
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -489,7 +571,6 @@ def extract_colors_from_regions(img_rgb: np.ndarray, masks: Dict[str, np.ndarray
     
     Returns:
         {
-            "head": {"hex": "#...", "name": "black", "rgb": [r, g, b]},
             "shirt": {...},
             "pants": {...},
             "shoes": {...}
@@ -580,7 +661,7 @@ def extract_colors_guided_by_classifier(
     
     Args:
         img_rgb: Original image as numpy array [H, W, 3]
-        masks: Dict with keys "head", "shirt", "pants", "shoes", each containing boolean mask
+        masks: Dict with keys "shirt", "pants", "shoes", each containing boolean mask
         classifier_colors: {"color_0": "pure-color", "color_1": "striped", "color_2": "NA"}
     
     Returns:
@@ -604,8 +685,8 @@ def extract_colors_guided_by_classifier(
     
     result = {}
     
-    # Initialize all regions
-    for region_name in ["head", "shirt", "pants", "shoes"]:
+    # Initialize all regions (excluding head)
+    for region_name in ["shirt", "pants", "shoes"]:
         result[region_name] = {
             "hex": None,
             "name": None,
@@ -639,9 +720,14 @@ def extract_colors_guided_by_classifier(
         if region_name not in masks or masks[region_name].sum() == 0:
             continue
         
-        # Extract RGB color from this region (pass region_name to filter skin for pants)
-        # Only do this for "pure-color" patterns
-        region_color = extract_color_from_region(img_rgb, masks[region_name], region_name=region_name)
+        # For shoes, exclude pants mask to prevent color contamination
+        exclude_mask = None
+        if region_name == "shoes" and "pants" in masks and masks["pants"].sum() > 0:
+            exclude_mask = masks["pants"]
+        
+        # Extract RGB color from this region
+        # Pass region_name to filter skin for pants/shirt, exclude_mask for shoes
+        region_color = extract_color_from_region(img_rgb, masks[region_name], region_name=region_name, exclude_mask=exclude_mask)
         
         if region_color["hex"] is not None:
             result[region_name] = {
@@ -650,18 +736,6 @@ def extract_colors_guided_by_classifier(
                 "rgb": region_color["rgb"],
                 "pattern": pattern,  # Classifier's pattern prediction
                 "classifier_source": color_key
-            }
-    
-    # For head region, extract color if available (not guided by classifier)
-    if "head" in masks and masks["head"].sum() > 0:
-        head_color = extract_color_from_region(img_rgb, masks["head"], region_name="head")
-        if head_color["hex"] is not None:
-            result["head"] = {
-                "hex": head_color["hex"],
-                "name": head_color["name"],
-                "rgb": head_color["rgb"],
-                "pattern": None,
-                "classifier_source": None
             }
     
     # Calculate confidence for each region
@@ -674,6 +748,54 @@ def extract_colors_guided_by_classifier(
 # VISUALIZATION
 # =========================
 
+def calculate_parsing_confidence(masks: Dict[str, np.ndarray]) -> Dict[str, float]:
+    """
+    Calculate simple parsing confidence based on region coverage.
+    
+    Args:
+        masks: Dict with region masks
+        
+    Returns:
+        Dict mapping region names to confidence values (0.0 to 1.0)
+    """
+    confidences = {}
+    h, w = next(iter(masks.values())).shape[:2] if masks else (1, 1)
+    total_pixels = h * w if h > 0 and w > 0 else 1
+    
+    # Expected coverage ranges for each region (as percentage of image)
+    expected_coverage = {
+        "shirt": (3.0, 15.0),   # Shirt: 3-15% of image
+        "pants": (5.0, 20.0),   # Pants: 5-20% of image
+        "shoes": (1.0, 8.0),    # Shoes: 1-8% of image
+    }
+    
+    for region_name, mask in masks.items():
+        if mask.sum() == 0:
+            confidences[region_name] = 0.0
+            continue
+        
+        coverage = (mask.sum() / total_pixels) * 100.0
+        
+        # Check if coverage is within expected range
+        if region_name in expected_coverage:
+            min_coverage, max_coverage = expected_coverage[region_name]
+            if min_coverage <= coverage <= max_coverage:
+                # Within expected range: high confidence
+                confidences[region_name] = 0.9
+            elif coverage < min_coverage:
+                # Below expected: lower confidence, scale linearly
+                confidences[region_name] = max(0.3, (coverage / min_coverage) * 0.7)
+            else:
+                # Above expected: slightly lower confidence
+                ratio = max_coverage / coverage if coverage > 0 else 0
+                confidences[region_name] = max(0.5, ratio * 0.8)
+        else:
+            # Default confidence if no expected range
+            confidences[region_name] = 0.7 if coverage > 1.0 else 0.3
+    
+    return confidences
+
+
 def visualize_parsed_regions(
     img_rgb: np.ndarray,
     masks: Dict[str, np.ndarray],
@@ -684,10 +806,11 @@ def visualize_parsed_regions(
 ) -> None:
     """
     Visualize parsed clothing regions with color overlays using matplotlib.
+    Includes extracted colors, hexcodes, color squares, and confidence levels for each region.
     
     Args:
         img_rgb: Original image as numpy array [H, W, 3]
-        masks: Dict with keys "head", "shirt", "pants", "shoes", each containing boolean mask
+        masks: Dict with keys "shirt", "pants", "shoes", each containing boolean mask
         save_path: Path to save visualization
         show: Whether to display the visualization
         matched_colors: Optional dict with color info per region (from extract_colors_guided_by_classifier)
@@ -698,9 +821,19 @@ def visualize_parsed_regions(
         visualize_parsed_regions_simple(img_rgb, masks, save_path)
         return
     
-    # Region colors for visualization (semi-transparent)
-    region_colors = {
-        "head": [255, 0, 0, 128],      # Red (semi-transparent)
+    # Calculate confidence if not provided
+    if confidences is None:
+        confidences = calculate_parsing_confidence(masks)
+    
+    # Extract actual colors from each region
+    extracted_colors = {}
+    for region_name, mask in masks.items():
+        if mask.sum() > 0:
+            color_data = extract_color_from_region(img_rgb, mask, region_name=region_name)
+            extracted_colors[region_name] = color_data
+    
+    # Region colors for visualization overlay (semi-transparent)
+    region_overlay_colors = {
         "shirt": [0, 255, 0, 128],     # Green (semi-transparent)
         "pants": [0, 0, 255, 128],     # Blue (semi-transparent)
         "shoes": [255, 255, 0, 128],   # Yellow (semi-transparent)
@@ -710,7 +843,7 @@ def visualize_parsed_regions(
     overlay = img_rgb.copy().astype(np.float32)
     
     # Apply colored overlays for each region
-    for region_name, color in region_colors.items():
+    for region_name, color in region_overlay_colors.items():
         if region_name in masks:
             mask = masks[region_name]
             if mask.sum() > 0:  # Only if region exists
@@ -725,23 +858,28 @@ def visualize_parsed_regions(
     # Convert back to uint8
     overlay = np.clip(overlay, 0, 255).astype(np.uint8)
     
-    # Create visualization with matplotlib
-    fig, axes = plt.subplots(1, 2, figsize=(16, 8))
+    # Create visualization with matplotlib (wider figure to accommodate legend)
+    # Use GridSpec for better layout control
+    fig = plt.figure(figsize=(24, 12))
+    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 0.8], hspace=0.05, wspace=0.15)
     
     # Left: Original image
-    axes[0].imshow(img_rgb)
-    axes[0].set_title("Original Image", fontsize=14, fontweight='bold')
-    axes[0].axis('off')
+    ax0 = fig.add_subplot(gs[0, 0])
+    ax0.imshow(img_rgb)
+    ax0.set_title("Original Image", fontsize=20, fontweight='bold', pad=15)
+    ax0.axis('off')
     
-    # Right: Parsed regions with overlay
-    axes[1].imshow(overlay)
-    axes[1].set_title("Parsed Regions (Overlay)", fontsize=14, fontweight='bold')
-    axes[1].axis('off')
+    # Middle: Parsed regions with overlay (no text overlays)
+    ax1 = fig.add_subplot(gs[0, 1])
+    ax1.imshow(overlay)
+    ax1.set_title("Parsed Regions (Overlay)", fontsize=20, fontweight='bold', pad=15)
+    ax1.axis('off')
     
     # Add legend with hex codes, color squares, and confidence
     legend_elements = []
     for region_name, color in region_colors.items():
         if region_name in masks and masks[region_name].sum() > 0:
+            mask = masks[region_name]
             # Count pixels in region
             pixel_count = masks[region_name].sum()
             percentage = (pixel_count / masks[region_name].size) * 100
@@ -784,7 +922,65 @@ def visualize_parsed_regions(
                     edgecolor='black',
                     linewidth=1.5
                 )
+                ax2.add_patch(extracted_square)
+                ax2.text(square_x + square_size/2, y_offset - square_size - 0.01,
+                        "Extracted", fontsize=9, ha='center', va='top',
+                        transform=ax2.transAxes, style='italic')
+            
+            # Draw overlay color square
+            overlay_rgb = [c / 255.0 for c in data['overlay_color'][:3]]
+            overlay_square_x = square_x + square_size + 0.03 if data['extracted_color'] else square_x
+            overlay_square = mpatches.Rectangle(
+                (overlay_square_x, y_offset - square_size), square_size, square_size,
+                facecolor=overlay_rgb, edgecolor='black', linewidth=2, alpha=0.7,
+                transform=ax2.transAxes
             )
+            ax2.add_patch(overlay_square)
+            ax2.text(overlay_square_x + square_size/2, y_offset - square_size - 0.01,
+                    "Overlay", fontsize=9, ha='center', va='top',
+                    transform=ax2.transAxes, style='italic')
+            
+            # Text information (organized vertically, no overlap)
+            info_y = y_offset
+            line_height = 0.035
+            
+            # Coverage info
+            info_y -= line_height
+            ax2.text(text_x, info_y,
+                    f"Coverage: {data['pixel_count']:,} px ({data['percentage']:.1f}%)",
+                    fontsize=12, ha='left', va='top', transform=ax2.transAxes)
+            
+            # Confidence (with color coding)
+            info_y -= line_height
+            confidence = data.get('confidence', 0.0)
+            conf_pct = confidence * 100
+            if confidence >= 0.7:
+                conf_color = 'green'
+            elif confidence >= 0.4:
+                conf_color = 'orange'
+            else:
+                conf_color = 'red'
+            ax2.text(text_x, info_y,
+                    f"Confidence: {conf_pct:.1f}%",
+                    fontsize=13, fontweight='bold', color=conf_color,
+                    ha='left', va='top', transform=ax2.transAxes)
+            
+            # Color information (if available)
+            if data['hex_code']:
+                info_y -= line_height
+                color_text = f"Hex: {data['hex_code']}"
+                if data['color_name']:
+                    color_text += f" ({data['color_name'].capitalize()})"
+                ax2.text(text_x, info_y, color_text,
+                        fontsize=12, ha='left', va='top',
+                        transform=ax2.transAxes, family='monospace')
+                
+                if data['extracted_color']:
+                    info_y -= line_height
+                    ax2.text(text_x, info_y,
+                            f"RGB: {tuple(data['extracted_color'])}",
+                            fontsize=11, ha='left', va='top',
+                            transform=ax2.transAxes, family='monospace')
     
     if legend_elements:
         # Position legend with better spacing
@@ -894,7 +1090,6 @@ def visualize_colors_with_classifier(
         print("[Color Visualization] Creating overlay image...")
         overlay = img_rgb.copy().astype(np.float32)
         region_colors_viz = {
-            "head": [255, 0, 0, 128],      # Red
             "shirt": [0, 255, 0, 128],     # Green
             "pants": [0, 0, 255, 128],     # Blue
             "shoes": [255, 255, 0, 128],   # Yellow
@@ -920,11 +1115,11 @@ def visualize_colors_with_classifier(
         
         # 3-6. Individual region colors with classifier info
         print("[Color Visualization] Creating color swatches for regions...")
-        regions_to_show = ["shirt", "pants", "shoes", "head"]
-        positions = [(2, 3, 3), (2, 3, 4), (2, 3, 5), (2, 3, 6)]
+        regions_to_show = ["shirt", "pants", "shoes"]
+        positions = [(2, 3, 3), (2, 3, 4), (2, 3, 5)]
         
         for idx, region_name in enumerate(regions_to_show):
-            print(f"[Color Visualization] Processing region {idx+1}/4: {region_name}")
+            print(f"[Color Visualization] Processing region {idx+1}/3: {region_name}")
             ax = plt.subplot(*positions[idx])
             
             region_data = matched_colors.get(region_name, {})
@@ -1042,7 +1237,6 @@ def visualize_parsed_regions_simple(
     overlay = img_rgb.copy().astype(np.float32)
     
     region_colors = {
-        "head": [255, 0, 0],      # Red
         "shirt": [0, 255, 0],     # Green
         "pants": [0, 0, 255],     # Blue
         "shoes": [255, 255, 0],   # Yellow
