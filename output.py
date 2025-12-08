@@ -444,9 +444,10 @@ def main():
     # === 4) Run attribute classification ===
     # Classifier runs independently without parser integration
     print("[Info] Running attribute classification...")
-    decoded_attrs, vertical_region_colors = infer_single(
+    decoded_attrs = infer_single(
         attr_model, args.image, device, transforms_img, parsing_mask=None
     )
+    vertical_region_colors = {}  # Legacy feature, not used anymore
     
     # === 5) Extract colors using classifier predictions as guide ===
     # Get classifier color predictions (color_0, color_1, color_2)
