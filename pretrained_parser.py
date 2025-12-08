@@ -821,10 +821,6 @@ def visualize_parsed_regions(
         visualize_parsed_regions_simple(img_rgb, masks, save_path)
         return
     
-    # Calculate confidence if not provided
-    if confidences is None:
-        confidences = calculate_parsing_confidence(masks)
-    
     # Extract actual colors from each region
     extracted_colors = {}
     for region_name, mask in masks.items():
@@ -877,7 +873,7 @@ def visualize_parsed_regions(
     
     # Add legend with hex codes, color squares, and confidence
     legend_elements = []
-    for region_name, color in region_colors.items():
+    for region_name, color in region_overlay_colors.items():
         if region_name in masks and masks[region_name].sum() > 0:
             mask = masks[region_name]
             # Count pixels in region
@@ -922,71 +918,13 @@ def visualize_parsed_regions(
                     edgecolor='black',
                     linewidth=1.5
                 )
-                ax2.add_patch(extracted_square)
-                ax2.text(square_x + square_size/2, y_offset - square_size - 0.01,
-                        "Extracted", fontsize=9, ha='center', va='top',
-                        transform=ax2.transAxes, style='italic')
-            
-            # Draw overlay color square
-            overlay_rgb = [c / 255.0 for c in data['overlay_color'][:3]]
-            overlay_square_x = square_x + square_size + 0.03 if data['extracted_color'] else square_x
-            overlay_square = mpatches.Rectangle(
-                (overlay_square_x, y_offset - square_size), square_size, square_size,
-                facecolor=overlay_rgb, edgecolor='black', linewidth=2, alpha=0.7,
-                transform=ax2.transAxes
             )
-            ax2.add_patch(overlay_square)
-            ax2.text(overlay_square_x + square_size/2, y_offset - square_size - 0.01,
-                    "Overlay", fontsize=9, ha='center', va='top',
-                    transform=ax2.transAxes, style='italic')
-            
-            # Text information (organized vertically, no overlap)
-            info_y = y_offset
-            line_height = 0.035
-            
-            # Coverage info
-            info_y -= line_height
-            ax2.text(text_x, info_y,
-                    f"Coverage: {data['pixel_count']:,} px ({data['percentage']:.1f}%)",
-                    fontsize=12, ha='left', va='top', transform=ax2.transAxes)
-            
-            # Confidence (with color coding)
-            info_y -= line_height
-            confidence = data.get('confidence', 0.0)
-            conf_pct = confidence * 100
-            if confidence >= 0.7:
-                conf_color = 'green'
-            elif confidence >= 0.4:
-                conf_color = 'orange'
-            else:
-                conf_color = 'red'
-            ax2.text(text_x, info_y,
-                    f"Confidence: {conf_pct:.1f}%",
-                    fontsize=13, fontweight='bold', color=conf_color,
-                    ha='left', va='top', transform=ax2.transAxes)
-            
-            # Color information (if available)
-            if data['hex_code']:
-                info_y -= line_height
-                color_text = f"Hex: {data['hex_code']}"
-                if data['color_name']:
-                    color_text += f" ({data['color_name'].capitalize()})"
-                ax2.text(text_x, info_y, color_text,
-                        fontsize=12, ha='left', va='top',
-                        transform=ax2.transAxes, family='monospace')
-                
-                if data['extracted_color']:
-                    info_y -= line_height
-                    ax2.text(text_x, info_y,
-                            f"RGB: {tuple(data['extracted_color'])}",
-                            fontsize=11, ha='left', va='top',
-                            transform=ax2.transAxes, family='monospace')
     
     if legend_elements:
         # Position legend with better spacing
-        axes[1].legend(handles=legend_elements, loc='upper right', fontsize=9, 
-                      framealpha=0.95, handlelength=2.5, handletextpad=0.8,
-                      borderpad=0.8, labelspacing=1.2)
+        ax1.legend(handles=legend_elements, loc='upper right', fontsize=9, 
+                  framealpha=0.95, handlelength=2.5, handletextpad=0.8,
+                  borderpad=0.8, labelspacing=1.2)
     
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches='tight')

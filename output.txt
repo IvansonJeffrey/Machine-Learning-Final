@@ -1,24 +1,24 @@
 {
   "categories": [
-    "grey Tank_Top",
-    "dark grey Shorts",
+    "light grey T-shirt",
+    "purple Shorts",
     "Shoes"
   ],
   "attributes": {
-    "sleeve_length": "short-sleeve",
-    "lower_length": "long",
-    "socks": "no",
-    "hat": "no",
+    "sleeve_length": "long-sleeve",
+    "lower_length": "medium-short",
+    "socks": "NA",
+    "hat": "yes",
     "glasses": "no",
-    "neckwear": "no",
-    "wristwear": "no",
+    "neckwear": "yes",
+    "wristwear": "yes",
     "ring": "no",
     "waist_accessory": "hidden",
     "neckline": "round",
     "outer_cardigan": "no",
     "upper_cover_navel": "yes",
     "fabric_0": "cotton",
-    "fabric_1": "denim",
+    "fabric_1": "cotton",
     "fabric_2": "NA",
     "color_0": "pure-color",
     "color_1": "pure-color",
@@ -26,23 +26,23 @@
   },
   "region_colors": {
     "shirt": {
-      "hex": "#675E69",
-      "name": "grey",
+      "hex": "#DAD3C8",
+      "name": "light grey",
       "rgb": [
-        103,
-        94,
-        105
+        218,
+        211,
+        200
       ],
       "pattern": "pure-color",
       "classifier_source": "color_0"
     },
     "pants": {
-      "hex": "#345B8F",
-      "name": "blue",
+      "hex": "#322653",
+      "name": "purple",
       "rgb": [
-        52,
-        91,
-        143
+        50,
+        38,
+        83
       ],
       "pattern": "pure-color",
       "classifier_source": "color_1"
@@ -56,11 +56,11 @@
     }
   },
   "color_confidence": {
-    "overall": 0.6255120181405895,
+    "overall": 0.7127222383812115,
     "per_region": {
-      "shirt": 0.600404081632653,
-      "pants": 1.0,
-      "shoes": 0.2761319727891156
+      "shirt": 1.0,
+      "pants": 0.8993139083272024,
+      "shoes": 0.23885280681643198
     }
   },
   "region_colors_vertical": {}
